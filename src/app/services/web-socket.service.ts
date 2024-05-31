@@ -1,7 +1,58 @@
-// src/app/websocket.service.ts
+// import { Injectable } from '@angular/core';
+// import { Client } from '@stomp/stompjs';
+// import * as SockJS from 'sockjs-client';
+// import { Subject } from 'rxjs';
+
+// @Injectable({
+//   providedIn: 'root'
+// })
+// export class WebSocketService {
+//   private stompClient: Client;
+//   private textUpdateSubject: Subject<string> = new Subject<string>();
+
+//   constructor() {
+//     this.stompClient = new Client({
+//       brokerURL: 'ws://localhost:8080/ws/websocket',
+//       connectHeaders: {},
+//       debug: (str) => { console.log(str); },
+//       reconnectDelay: 5000,
+//       heartbeatIncoming: 4000,
+//       heartbeatOutgoing: 4000,
+//       webSocketFactory: () => {
+//         return new SockJS('http://localhost:8080/ws');
+//       }
+//     });
+
+//     this.stompClient.onConnect = (frame) => {
+//       this.stompClient.subscribe('/topic/updates', (message) => {
+//         this.textUpdateSubject.next(JSON.parse(message.body).content);
+//       });
+//     };
+
+//     this.stompClient.onStompError = (frame) => {
+//       console.error('Broker reported error: ' + frame.headers['message']);
+//       console.error('Additional details: ' + frame.body);
+//     };
+
+//     this.stompClient.activate();
+//   }
+
+//   sendTextUpdate(text: string) {
+//     this.stompClient.publish({
+//       destination: '/app/changeText',
+//       body: JSON.stringify({ content: text })
+//     });
+//   }
+
+//   getTextUpdates() {
+//     return this.textUpdateSubject.asObservable();
+//   }
+// }
+
+
 import { Injectable } from '@angular/core';
-import { Client, Stomp } from '@stomp/stompjs';
-import * as SockJS from 'sockjs-client';
+import { Client, Message } from '@stomp/stompjs';
+import SockJS from 'sockjs-client';
 import { Subject } from 'rxjs';
 
 @Injectable({
@@ -9,7 +60,7 @@ import { Subject } from 'rxjs';
 })
 export class WebSocketService {
   private stompClient: Client;
-  private textUpdateSubject: Subject<string> = new Subject<string>();
+  private textUpdateSubjects: { [key: string]: Subject<string> } = {};
 
   constructor() {
     this.stompClient = new Client({
@@ -19,11 +70,15 @@ export class WebSocketService {
       reconnectDelay: 5000,
       heartbeatIncoming: 4000,
       heartbeatOutgoing: 4000,
+      webSocketFactory: () => {
+        return new SockJS('http://localhost:8080/ws');
+      }
     });
 
     this.stompClient.onConnect = (frame) => {
-      this.stompClient.subscribe('/topic/updates', (message) => {
-        this.textUpdateSubject.next(JSON.parse(message.body).content);
+      console.log('Connected: ' + frame);
+      Object.keys(this.textUpdateSubjects).forEach((documentId) => {
+        this.subscribeToDocument(documentId);
       });
     };
 
@@ -35,14 +90,32 @@ export class WebSocketService {
     this.stompClient.activate();
   }
 
-  sendTextUpdate(text: string) {
+  private subscribeToDocument(documentId: string) {
+    if (!this.textUpdateSubjects[documentId]) {
+      this.textUpdateSubjects[documentId] = new Subject<string>();
+    }
+    this.stompClient.subscribe(`/topic/updates/${documentId}`, (message: Message) => {
+      const content = JSON.parse(message.body).content;
+      console.log(`Received update for document ${documentId} in WebSocketService: ${content}`);
+      this.textUpdateSubjects[documentId].next(content);
+    });
+  }
+
+  connectToDocument(documentId: string) {
+    this.subscribeToDocument(documentId);
+  }
+
+  sendTextUpdate(documentId: string, text: string) {
     this.stompClient.publish({
-      destination: '/app/changeText',
+      destination: `/app/changeText/${documentId}`,
       body: JSON.stringify({ content: text })
     });
   }
 
-  getTextUpdates() {
-    return this.textUpdateSubject.asObservable();
+  getTextUpdates(documentId: string) {
+    if (!this.textUpdateSubjects[documentId]) {
+      this.textUpdateSubjects[documentId] = new Subject<string>();
+    }
+    return this.textUpdateSubjects[documentId].asObservable();
   }
 }

@@ -24,7 +24,7 @@
 
 
 
-import { Component, OnInit, ChangeDetectorRef } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { WebSocketService } from 'src/app/services/web-socket.service';
 
@@ -53,7 +53,7 @@ export class EditorComponent implements OnInit {
     }
   }
 
-  onTextChanged(event: any): void {
+  onTextChanged(event: any) {
     console.log(`Sending update for document ${this.documentId}: ${event.target.value}`);
     if (this.documentId) {
       this.webSocketService.sendTextUpdate(this.documentId, event.target.value);

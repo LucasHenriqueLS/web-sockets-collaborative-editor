@@ -60,7 +60,7 @@ import { Subject } from 'rxjs';
 })
 export class WebSocketService {
   private stompClient: Client;
-  private textUpdateSubjects: { [key: string]: Subject<string> } = {};
+  private textUpdateSubjects: Map<string, Subject<string>> = new Map();
 
   constructor() {
     this.stompClient = new Client({
@@ -72,37 +72,46 @@ export class WebSocketService {
       heartbeatOutgoing: 4000,
       webSocketFactory: () => {
         return new SockJS('http://localhost:8080/ws');
+      },
+      onConnect: (frame) => {
+        console.log('Connected: ' + frame);
+        this.textUpdateSubjects.forEach((subject, documentId) => {
+          this.subscribeToDocument(documentId);
+        });
+      },
+      onStompError: (frame) => {
+        console.error('Broker reported error: ' + frame.headers['message']);
+        console.error('Additional details: ' + frame.body);
       }
     });
-
-    this.stompClient.onConnect = (frame) => {
-      console.log('Connected: ' + frame);
-      Object.keys(this.textUpdateSubjects).forEach((documentId) => {
-        this.subscribeToDocument(documentId);
-      });
-    };
-
-    this.stompClient.onStompError = (frame) => {
-      console.error('Broker reported error: ' + frame.headers['message']);
-      console.error('Additional details: ' + frame.body);
-    };
 
     this.stompClient.activate();
   }
 
   private subscribeToDocument(documentId: string) {
-    if (!this.textUpdateSubjects[documentId]) {
-      this.textUpdateSubjects[documentId] = new Subject<string>();
+    if (!this.textUpdateSubjects.has(documentId)) {
+      this.textUpdateSubjects.set(documentId, new Subject<string>());
     }
-    this.stompClient.subscribe(`/topic/updates/${documentId}`, (message: Message) => {
-      const content = JSON.parse(message.body).content;
-      console.log(`Received update for document ${documentId} in WebSocketService: ${content}`);
-      this.textUpdateSubjects[documentId].next(content);
-    });
+    if (this.stompClient.connected) {
+      this.stompClient.subscribe(`/topic/updates/${documentId}`, (message) => {
+        const content = JSON.parse(message.body).content;
+        console.log(`Received update for document ${documentId} in WebSocketService: ${content}`);
+        this.textUpdateSubjects.get(documentId)!.next(content);
+      });
+    } else {
+      console.warn(`Cannot subscribe to document ${documentId} because STOMP client is not connected.`);
+    }
   }
 
   connectToDocument(documentId: string) {
-    this.subscribeToDocument(documentId);
+    if (this.stompClient.connected) {
+      this.subscribeToDocument(documentId);
+    } else {
+      this.stompClient.onConnect = (frame) => {
+        console.log('Connected: ' + frame);
+        this.subscribeToDocument(documentId);
+      };
+    }
   }
 
   sendTextUpdate(documentId: string, text: string) {
@@ -113,9 +122,9 @@ export class WebSocketService {
   }
 
   getTextUpdates(documentId: string) {
-    if (!this.textUpdateSubjects[documentId]) {
-      this.textUpdateSubjects[documentId] = new Subject<string>();
+    if (!this.textUpdateSubjects.has(documentId)) {
+      this.textUpdateSubjects.set(documentId, new Subject<string>());
     }
-    return this.textUpdateSubjects[documentId].asObservable();
+    return this.textUpdateSubjects.get(documentId)!.asObservable();
   }
 }
